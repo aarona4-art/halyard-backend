@@ -52,22 +52,35 @@ export async function pollFlagStatus() {
   }
 
   for (const event of events) {
-    const isNew = await upsertIfNew(event);
-    if (isNew) {
-      const sentCount = await notifySubscribers({
-        region: event.region,
-        status: event.status,
-        reason: event.reason,
-      });
-      await markNotified(event.region, event.status, event.startDate);
-      console.log(`New ${event.status} event for ${event.region}: notified ${sentCount} devices`);
+    // Each event is handled independently — a database hiccup or bad row on
+    // one event must never take down the whole process (this crashed the
+    // server in production before this fix: a transient connection error
+    // during upsertIfNew went unhandled and Node exits by default on an
+    // unhandled rejection).
+    try {
+      const isNew = await upsertIfNew(event);
+      if (isNew) {
+        const sentCount = await notifySubscribers({
+          region: event.region,
+          status: event.status,
+          reason: event.reason,
+        });
+        await markNotified(event.region, event.status, event.startDate);
+        console.log(`New ${event.status} event for ${event.region}: notified ${sentCount} devices`);
+      }
+    } catch (err) {
+      console.error(`Failed to process event for region ${event.region}`, err);
+      // Deliberately no rethrow — continue to the next event instead of
+      // aborting the whole poll cycle over one bad record.
     }
   }
 }
 
 /** Starts the recurring poll — every 30 minutes. Adjust to taste. */
 export function startPollingJob() {
-  cron.schedule('*/30 * * * *', pollFlagStatus);
+  cron.schedule('*/30 * * * *', () => {
+    pollFlagStatus().catch((err) => console.error('Scheduled poll failed', err));
+  });
   // Run once immediately on boot so status isn't stale until the first tick
-  pollFlagStatus();
+  pollFlagStatus().catch((err) => console.error('Initial poll failed', err));
 }
