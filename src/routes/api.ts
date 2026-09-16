@@ -3,6 +3,24 @@ import { query } from '../db';
 
 export const router = Router();
 
+// Postgres returns snake_case columns (start_date, end_date, etc.) — the
+// app expects camelCase (startDate, endDate, etc.). Without this mapping,
+// those fields come through as undefined on the client, which is why the
+// history date range was rendering as "Invalid Date" instead of a real date.
+function toFlagEvent(row: any) {
+  if (!row) return row;
+  return {
+    id: row.id,
+    region: row.region,
+    status: row.status,
+    reason: row.reason,
+    issuedBy: row.issued_by,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    sourceUrl: row.source_url,
+  };
+}
+
 // GET /status?states=CO,NY — current status for federal + requested states
 router.get('/status', async (req, res) => {
   const states = String(req.query.states ?? '')
@@ -19,7 +37,7 @@ router.get('/status', async (req, res) => {
   );
 
   const byRegion: Record<string, any> = {};
-  for (const row of rows) byRegion[row.region] = row;
+  for (const row of rows) byRegion[row.region] = toFlagEvent(row);
 
   res.json({
     federal: byRegion['US'] ?? { region: 'US', status: 'full-staff' },
@@ -36,7 +54,7 @@ router.get('/events/:region', async (req, res) => {
     `SELECT * FROM flag_events WHERE region = $1 ORDER BY start_date DESC LIMIT $2`,
     [req.params.region, limit]
   );
-  res.json(rows);
+  res.json(rows.map(toFlagEvent));
 });
 
 // POST /device-tokens — register a device for push
