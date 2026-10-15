@@ -89,13 +89,21 @@ router.post('/subscriptions', async (req, res) => {
 
   await query(`DELETE FROM subscriptions WHERE device_token_id = $1`, [deviceId]);
   for (const region of regions) {
+    // The federal row follows the "federal changes" toggle; state rows follow
+    // the separate "state changes" toggle. Previously every row used
+    // federalChanges, so turning federal alerts off also silenced state alerts.
+    const notifyHalfStaff =
+      region === 'US'
+        ? notifications?.federalChanges ?? true
+        : notifications?.stateChanges ?? true;
+
     await query(
       `INSERT INTO subscriptions (device_token_id, region, notify_half_staff, notify_full_staff, notify_daily_digest)
        VALUES ($1, $2, $3, $4, $5)`,
       [
         deviceId,
         region,
-        notifications?.federalChanges ?? true,
+        notifyHalfStaff,
         notifications?.returnToFullStaff ?? false,
         notifications?.dailyDigest ?? false,
       ]
